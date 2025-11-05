@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 anyhow = "1.0.100"
 dotenv = "0.15.0"
+solana-address-lookup-table-interface = "3.0.0"
 solana-client = "3.0.10"
 solana-sdk = "3.0.0"
 solana-transaction-status = "3.0.10"

@@ -115,7 +115,7 @@ type MsgpackPubkey = [u8; 32];
 #[allow(dead_code)]
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct SwapQuotes {
+pub struct SwapQuotes {
     pub id: String,
     pub input_mint: MsgpackPubkey,
     pub output_mint: MsgpackPubkey,
@@ -127,14 +127,14 @@ pub(crate) struct SwapQuotes {
 #[allow(dead_code)]
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct SwapRoute {
+pub struct SwapRoute {
     pub in_amount: u64,
     pub out_amount: u64,
     pub slippage_bps: u16,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub platform_fee: Option<PlatformFeeData>,
-    pub steps: Vec<RoutePlanStepData>,
-    pub instructions: Vec<InstructionData>,
+    pub(crate) platform_fee: Option<PlatformFeeData>,
+    pub(crate) steps: Vec<RoutePlanStepData>,
+    pub(crate) instructions: Vec<InstructionData>,
     pub address_lookup_tables: Vec<MsgpackPubkey>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context_slot: Option<u64>,

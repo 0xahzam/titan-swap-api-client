@@ -9,5 +9,4 @@ pub struct SwapResponse {
     pub context_slot: Option<u64>,
     pub expires_at_ms: Option<u64>,
     pub expires_after_slot: Option<u64>,
-    pub transaction: Option<Vec<u8>>,
 }

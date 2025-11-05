@@ -1,8 +1,10 @@
+use solana_address_lookup_table_interface::state::AddressLookupTable;
 use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
+    message::{v0, AddressLookupTableAccount, VersionedMessage},
     pubkey::Pubkey,
     signature::{Keypair, Signer},
-    transaction::Transaction,
+    transaction::VersionedTransaction,
 };
 use std::str::FromStr;
 use titan_swap_api_client::{quote::QuoteRequest, quote::SwapMode, TitanClient};
@@ -64,17 +66,7 @@ async fn main() -> anyhow::Result<()> {
         if quote.route_plan.len() == 1 { "" } else { "s" }
     );
 
-    let swap = match client.swap(&request).await {
-        Ok(swap) => swap,
-        Err(e) => {
-            eprintln!("Error: Could not get swap instructions: {}", e);
-            if !send_tx {
-                return Ok(());
-            }
-            return Err(e.into());
-        }
-    };
-
+    let swap = client.swap(&request).await?;
     println!(
         "Swap: {} instructions, {} CU limit, {} ALT{}",
         swap.instructions.len(),
@@ -88,23 +80,49 @@ async fn main() -> anyhow::Result<()> {
     );
 
     if !send_tx {
+        println!("\nSet TITAN_SEND_TX=true to actually send the transaction");
         return Ok(());
     }
 
     let rpc_client = RpcClient::new(rpc_url);
+    let blockhash = rpc_client.get_latest_blockhash().await?;
 
-    let recent_blockhash = rpc_client.get_latest_blockhash().await?;
+    let mut lookup_table_accounts = vec![];
+    if !swap.address_lookup_table_addresses.is_empty() {
+        println!(
+            "\nFetching {} address lookup tables...",
+            swap.address_lookup_table_addresses.len()
+        );
 
-    let transaction = Transaction::new_signed_with_payer(
-        &swap.instructions,
-        Some(&keypair.pubkey()),
+        for alt_address in &swap.address_lookup_table_addresses {
+            let raw_account = rpc_client.get_account(alt_address).await?;
+            let address_lookup_table = AddressLookupTable::deserialize(&raw_account.data)?;
+
+            println!(
+                "  Loaded ALT {} with {} addresses",
+                alt_address,
+                address_lookup_table.addresses.len()
+            );
+
+            lookup_table_accounts.push(AddressLookupTableAccount {
+                key: *alt_address,
+                addresses: address_lookup_table.addresses.to_vec(),
+            });
+        }
+    }
+
+    let tx = VersionedTransaction::try_new(
+        VersionedMessage::V0(v0::Message::try_compile(
+            &keypair.pubkey(),
+            &swap.instructions,
+            &lookup_table_accounts,
+            blockhash,
+        )?),
         &[&keypair],
-        recent_blockhash,
-    );
+    )?;
 
-    let signature = rpc_client
-        .send_and_confirm_transaction(&transaction)
-        .await?;
+    println!("\nSending transaction...");
+    let signature = rpc_client.send_transaction(&tx).await?;
 
     println!("\nTransaction sent: {}", signature);
     println!("Explorer: https://solscan.io/tx/{}", signature);

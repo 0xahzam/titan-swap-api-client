@@ -1,4 +1,4 @@
-use crate::quote::{QuoteRequest, QuoteResponse, SwapMode};
+use crate::quote::{QuoteRequest, QuoteResponse, SwapMode, SwapQuotes};
 use reqwest::Response;
 use solana_sdk::pubkey::Pubkey;
 use thiserror::Error;
@@ -40,13 +40,14 @@ impl TitanClient {
         }
     }
 
-    pub async fn quote(&self, request: &QuoteRequest) -> Result<QuoteResponse, ClientError> {
-        let params = build_query_params(request);
-
+    async fn fetch_swap_route(
+        &self,
+        params: &[(&str, String)],
+    ) -> Result<quote::SwapRoute, ClientError> {
         let response = self
             .client
             .get(format!("{}/api/v1/quote/swap", self.base_path))
-            .query(&params)
+            .query(params)
             .header("Accept", "application/vnd.msgpack")
             .header("Authorization", &self.auth_header)
             .send()
@@ -54,15 +55,18 @@ impl TitanClient {
 
         let response = check_response(response).await?;
         let buffer = response.bytes().await?;
-        let data: crate::quote::SwapQuotes =
-            rmp_serde::from_slice(&buffer).map_err(ClientError::MsgpackError)?;
+        let data: SwapQuotes = rmp_serde::from_slice(&buffer)?;
 
-        let route = data
-            .quotes
-            .iter()
+        data.quotes
+            .into_iter()
             .find(|(key, _)| key.eq_ignore_ascii_case(TITAN_ROUTE_KEY))
             .map(|(_, route)| route)
-            .ok_or(ClientError::NoRoutesAvailable)?;
+            .ok_or(ClientError::NoRoutesAvailable)
+    }
+
+    pub async fn quote(&self, request: &QuoteRequest) -> Result<QuoteResponse, ClientError> {
+        let params = build_query_params(request);
+        let route = self.fetch_swap_route(&params).await?;
 
         let context_slot = route.context_slot.unwrap_or(0);
         let route_plan: Vec<_> = route
@@ -76,15 +80,12 @@ impl TitanClient {
             in_amount: request.amount,
             output_mint: request.output_mint,
             out_amount: route.out_amount,
-            swap_mode: data.swap_mode,
+            swap_mode: request.swap_mode.clone().unwrap_or_default(),
             slippage_bps: route.slippage_bps,
-            platform_fee: route
-                .platform_fee
-                .as_ref()
-                .map(|pf| crate::quote::PlatformFee {
-                    amount: pf.amount,
-                    fee_bps: pf.fee_bps,
-                }),
+            platform_fee: route.platform_fee.as_ref().map(|pf| quote::PlatformFee {
+                amount: pf.amount,
+                fee_bps: pf.fee_bps,
+            }),
             route_plan,
             context_slot: route.context_slot,
             time_taken: route.time_taken_ns.map(|ns| ns as f64 / 1e9),
@@ -95,27 +96,7 @@ impl TitanClient {
 
     pub async fn swap(&self, request: &QuoteRequest) -> Result<swap::SwapResponse, ClientError> {
         let params = build_query_params(request);
-
-        let response = self
-            .client
-            .get(format!("{}/api/v1/quote/swap", self.base_path))
-            .query(&params)
-            .header("Accept", "application/vnd.msgpack")
-            .header("Authorization", &self.auth_header)
-            .send()
-            .await?;
-
-        let response = check_response(response).await?;
-        let buffer = response.bytes().await?;
-        let data: crate::quote::SwapQuotes =
-            rmp_serde::from_slice(&buffer).map_err(ClientError::MsgpackError)?;
-
-        let route = data
-            .quotes
-            .iter()
-            .find(|(key, _)| key.eq_ignore_ascii_case(TITAN_ROUTE_KEY))
-            .map(|(_, route)| route)
-            .ok_or(ClientError::NoRoutesAvailable)?;
+        let route = self.fetch_swap_route(&params).await?;
 
         if route.instructions.is_empty() {
             return Err(ClientError::NoRoutesAvailable);
@@ -124,29 +105,25 @@ impl TitanClient {
         let solana_instructions: Vec<solana_sdk::instruction::Instruction> = route
             .instructions
             .iter()
-            .map(|inst| {
-                let pubkey_from_bytes = |bytes: &[u8; 32]| -> Pubkey { Pubkey::from(*bytes) };
-
-                solana_sdk::instruction::Instruction {
-                    program_id: pubkey_from_bytes(&inst.p),
-                    accounts: inst
-                        .a
-                        .iter()
-                        .map(|meta| solana_sdk::instruction::AccountMeta {
-                            pubkey: pubkey_from_bytes(&meta.p),
-                            is_signer: meta.s,
-                            is_writable: meta.w,
-                        })
-                        .collect(),
-                    data: inst.d.clone(),
-                }
+            .map(|inst| solana_sdk::instruction::Instruction {
+                program_id: pubkey_from_bytes(&inst.p),
+                accounts: inst
+                    .a
+                    .iter()
+                    .map(|meta| solana_sdk::instruction::AccountMeta {
+                        pubkey: pubkey_from_bytes(&meta.p),
+                        is_signer: meta.s,
+                        is_writable: meta.w,
+                    })
+                    .collect(),
+                data: inst.d.clone(),
             })
             .collect();
 
         let address_lookup_tables: Vec<Pubkey> = route
             .address_lookup_tables
             .iter()
-            .map(|bytes| Pubkey::from(*bytes))
+            .map(pubkey_from_bytes)
             .collect();
 
         Ok(swap::SwapResponse {
@@ -157,7 +134,6 @@ impl TitanClient {
             context_slot: route.context_slot,
             expires_at_ms: route.expires_at_ms,
             expires_after_slot: route.expires_after_slot,
-            transaction: route.transaction.clone(),
         })
     }
 }
@@ -206,8 +182,6 @@ fn transform_step(
     step: &crate::quote::RoutePlanStepData,
     default_context_slot: u64,
 ) -> crate::quote::RoutePlanStep {
-    let pubkey_from_bytes = |bytes: &[u8; 32]| -> Pubkey { Pubkey::from(*bytes) };
-
     crate::quote::RoutePlanStep {
         swap_info: crate::quote::SwapInfo {
             amm_key: pubkey_from_bytes(&step.amm_key),
@@ -241,4 +215,9 @@ async fn check_response(response: Response) -> Result<Response, ClientError> {
     }
 
     Err(ClientError::RequestFailed { status, body })
+}
+
+#[inline]
+fn pubkey_from_bytes(bytes: &[u8; 32]) -> Pubkey {
+    Pubkey::from(*bytes)
 }
