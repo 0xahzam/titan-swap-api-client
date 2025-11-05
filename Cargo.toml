@@ -1,8 +1,17 @@
-[package]
-name = "titan-swap-api-client"
+[workspace]
+members = [".", "examples"]
+resolver = "2"
+
+[workspace.package]
 version = "0.1.0"
 edition = "2021"
-license = "Apache-2.0"
+license = "MIT"
+
+[package]
+name = "titan-swap-api-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
 description = "Rust client for Titan swap aggregator API on Solana."
 
 [dependencies]
