@@ -77,15 +77,12 @@ pub struct QuoteResponse {
     pub swap_mode: SwapMode,
     pub slippage_bps: u16,
     pub platform_fee: Option<PlatformFee>,
+    pub raw_route: SwapRoute,
     pub route_plan: Vec<RoutePlanStep>,
     #[serde(default)]
     pub context_slot: Option<u64>,
     #[serde(default)]
     pub time_taken: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error_code: Option<String>,
 }
 
 type Dexes = String;
@@ -125,7 +122,7 @@ pub struct SwapQuotes {
 }
 
 #[allow(dead_code)]
-#[derive(Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct SwapRoute {
     pub in_amount: u64,
@@ -155,7 +152,7 @@ pub struct SwapRoute {
 }
 
 #[allow(dead_code)]
-#[derive(Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RoutePlanStepData {
     pub amm_key: MsgpackPubkey,
@@ -174,7 +171,7 @@ pub(crate) struct RoutePlanStepData {
 }
 
 #[allow(dead_code)]
-#[derive(Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub(crate) struct InstructionData {
     pub p: MsgpackPubkey,
     pub a: Vec<AccountMetaData>,
@@ -182,7 +179,7 @@ pub(crate) struct InstructionData {
 }
 
 #[allow(dead_code)]
-#[derive(Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub(crate) struct AccountMetaData {
     pub p: MsgpackPubkey,
     pub s: bool,
@@ -190,7 +187,7 @@ pub(crate) struct AccountMetaData {
 }
 
 #[allow(dead_code)]
-#[derive(Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub(crate) struct PlatformFeeData {
     pub amount: u64,
     pub fee_bps: u8,

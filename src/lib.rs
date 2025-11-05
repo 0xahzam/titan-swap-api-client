@@ -40,10 +40,10 @@ impl TitanClient {
         }
     }
 
-    async fn fetch_swap_route(
+    async fn fetch_swap_quotes(
         &self,
         params: &[(&str, String)],
-    ) -> Result<quote::SwapRoute, ClientError> {
+    ) -> Result<SwapQuotes, ClientError> {
         let response = self
             .client
             .get(format!("{}/api/v1/quote/swap", self.base_path))
@@ -55,9 +55,12 @@ impl TitanClient {
 
         let response = check_response(response).await?;
         let buffer = response.bytes().await?;
-        let data: SwapQuotes = rmp_serde::from_slice(&buffer)?;
+        Ok(rmp_serde::from_slice(&buffer)?)
+    }
 
-        data.quotes
+    fn extract_titan_route(quotes: SwapQuotes) -> Result<quote::SwapRoute, ClientError> {
+        quotes
+            .quotes
             .into_iter()
             .find(|(key, _)| key.eq_ignore_ascii_case(TITAN_ROUTE_KEY))
             .map(|(_, route)| route)
@@ -66,7 +69,8 @@ impl TitanClient {
 
     pub async fn quote(&self, request: &QuoteRequest) -> Result<QuoteResponse, ClientError> {
         let params = build_query_params(request);
-        let route = self.fetch_swap_route(&params).await?;
+        let quotes = self.fetch_swap_quotes(&params).await?;
+        let route = Self::extract_titan_route(quotes)?;
 
         let context_slot = route.context_slot.unwrap_or(0);
         let route_plan: Vec<_> = route
@@ -86,17 +90,15 @@ impl TitanClient {
                 amount: pf.amount,
                 fee_bps: pf.fee_bps,
             }),
+            raw_route: route.clone(),
             route_plan,
             context_slot: route.context_slot,
             time_taken: route.time_taken_ns.map(|ns| ns as f64 / 1e9),
-            error: None,
-            error_code: None,
         })
     }
 
-    pub async fn swap(&self, request: &QuoteRequest) -> Result<swap::SwapResponse, ClientError> {
-        let params = build_query_params(request);
-        let route = self.fetch_swap_route(&params).await?;
+    pub fn swap(&self, quote: &QuoteResponse) -> Result<swap::SwapResponse, ClientError> {
+        let route = &quote.raw_route;
 
         if route.instructions.is_empty() {
             return Err(ClientError::NoRoutesAvailable);

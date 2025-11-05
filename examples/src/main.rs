@@ -1,6 +1,7 @@
 use solana_address_lookup_table_interface::state::AddressLookupTable;
 use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
+    instruction::Instruction,
     message::{v0, AddressLookupTableAccount, VersionedMessage},
     pubkey::Pubkey,
     signature::{Keypair, Signer},
@@ -66,7 +67,8 @@ async fn main() -> anyhow::Result<()> {
         if quote.route_plan.len() == 1 { "" } else { "s" }
     );
 
-    let swap = client.swap(&request).await?;
+    let swap = client.swap(&quote)?;
+
     println!(
         "Swap: {} instructions, {} CU limit, {} ALT{}",
         swap.instructions.len(),
@@ -85,41 +87,13 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let rpc_client = RpcClient::new(rpc_url);
-    let blockhash = rpc_client.get_latest_blockhash().await?;
-
-    let mut lookup_table_accounts = vec![];
-    if !swap.address_lookup_table_addresses.is_empty() {
-        println!(
-            "\nFetching {} address lookup tables...",
-            swap.address_lookup_table_addresses.len()
-        );
-
-        for alt_address in &swap.address_lookup_table_addresses {
-            let raw_account = rpc_client.get_account(alt_address).await?;
-            let address_lookup_table = AddressLookupTable::deserialize(&raw_account.data)?;
-
-            println!(
-                "  Loaded ALT {} with {} addresses",
-                alt_address,
-                address_lookup_table.addresses.len()
-            );
-
-            lookup_table_accounts.push(AddressLookupTableAccount {
-                key: *alt_address,
-                addresses: address_lookup_table.addresses.to_vec(),
-            });
-        }
-    }
-
-    let tx = VersionedTransaction::try_new(
-        VersionedMessage::V0(v0::Message::try_compile(
-            &keypair.pubkey(),
-            &swap.instructions,
-            &lookup_table_accounts,
-            blockhash,
-        )?),
-        &[&keypair],
-    )?;
+    let tx = build_and_sign_transaction(
+        &rpc_client,
+        &keypair,
+        swap.instructions,
+        swap.address_lookup_table_addresses,
+    )
+    .await?;
 
     println!("\nSending transaction...");
     let signature = rpc_client.send_transaction(&tx).await?;
@@ -128,4 +102,48 @@ async fn main() -> anyhow::Result<()> {
     println!("Explorer: https://solscan.io/tx/{}", signature);
 
     Ok(())
+}
+
+async fn build_and_sign_transaction(
+    rpc_client: &RpcClient,
+    keypair: &Keypair,
+    instructions: Vec<Instruction>,
+    alt_addresses: Vec<Pubkey>,
+) -> anyhow::Result<VersionedTransaction> {
+    let blockhash = rpc_client.get_latest_blockhash().await?;
+
+    let lookup_tables = if alt_addresses.is_empty() {
+        vec![]
+    } else {
+        println!(
+            "\nFetching {} address lookup tables...",
+            alt_addresses.len()
+        );
+
+        let mut tables = Vec::with_capacity(alt_addresses.len());
+        for alt_address in &alt_addresses {
+            let account = rpc_client.get_account(alt_address).await?;
+            let alt = AddressLookupTable::deserialize(&account.data)?;
+
+            println!(
+                "  Loaded ALT {} with {} addresses",
+                alt_address,
+                alt.addresses.len()
+            );
+
+            tables.push(AddressLookupTableAccount {
+                key: *alt_address,
+                addresses: alt.addresses.to_vec(),
+            });
+        }
+        tables
+    };
+
+    let message =
+        v0::Message::try_compile(&keypair.pubkey(), &instructions, &lookup_tables, blockhash)?;
+
+    Ok(VersionedTransaction::try_new(
+        VersionedMessage::V0(message),
+        &[keypair],
+    )?)
 }
