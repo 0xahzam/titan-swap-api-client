@@ -8,7 +8,10 @@ use solana_sdk::{
     transaction::VersionedTransaction,
 };
 use std::str::FromStr;
-use titan_swap_api_client::{quote::QuoteRequest, quote::SwapMode, TitanClient};
+use titan_swap_api_client::{
+    quote::{Provider, QuoteRequest, SwapMode},
+    TitanClient,
+};
 
 const SOL_MINT: &str = "So11111111111111111111111111111111111111112";
 const USDC_MINT: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
@@ -54,6 +57,7 @@ async fn main() -> anyhow::Result<()> {
         max_accounts: Some(50),
         swap_mode: Some(SwapMode::ExactIn),
         slippage_bps: SLIPPAGE_BPS,
+        // providers: Some(Provider::Titan),
         ..Default::default()
     };
 
@@ -69,8 +73,13 @@ async fn main() -> anyhow::Result<()> {
 
     let swap = client.swap(&quote)?;
 
+    let is_titan_swap = swap
+        .instructions
+        .iter()
+        .any(|ix| ix.program_id.to_string() == "T1TANpTeScyeqVzzgNViGDNrkQ6qHz9KrSBS4aNXvGT");
+
     println!(
-        "Swap: {} instructions, {} CU limit, {} ALT{}",
+        "Swap: {} instructions, {} CU limit, {} ALT{} [{}]",
         swap.instructions.len(),
         swap.compute_unit_limit,
         swap.address_lookup_table_addresses.len(),
@@ -78,6 +87,11 @@ async fn main() -> anyhow::Result<()> {
             ""
         } else {
             "s"
+        },
+        if is_titan_swap {
+            "Titan Routing"
+        } else {
+            "Direct Routing"
         }
     );
 

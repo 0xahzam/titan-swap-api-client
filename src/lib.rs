@@ -8,7 +8,6 @@ pub mod serde_helpers;
 pub mod swap;
 
 const TITAN_API_URL: &str = "https://api.titan.exchange";
-const TITAN_ROUTE_KEY: &str = "titan";
 
 #[derive(Debug, Error)]
 pub enum ClientError {
@@ -58,19 +57,15 @@ impl TitanClient {
         Ok(rmp_serde::from_slice(&buffer)?)
     }
 
-    fn extract_titan_route(quotes: SwapQuotes) -> Result<quote::SwapRoute, ClientError> {
-        quotes
-            .quotes
-            .into_iter()
-            .find(|(key, _)| key.eq_ignore_ascii_case(TITAN_ROUTE_KEY))
-            .map(|(_, route)| route)
-            .ok_or(ClientError::NoRoutesAvailable)
-    }
-
     pub async fn quote(&self, request: &QuoteRequest) -> Result<QuoteResponse, ClientError> {
         let params = build_query_params(request);
         let quotes = self.fetch_swap_quotes(&params).await?;
-        let route = Self::extract_titan_route(quotes)?;
+
+        let route = quotes
+            .quotes
+            .into_values()
+            .next()
+            .ok_or(ClientError::NoRoutesAvailable)?;
 
         let context_slot = route.context_slot.unwrap_or(0);
         let route_plan: Vec<_> = route
@@ -175,6 +170,10 @@ fn build_query_params(request: &QuoteRequest) -> Vec<(&'static str, String)> {
     }
     if let Some(accounts_limit_writable) = request.accounts_limit_writable {
         params.push(("accountsLimitWritable", accounts_limit_writable.to_string()));
+    }
+
+    if let Some(ref providers) = request.providers {
+        params.push(("providers", providers.to_string()));
     }
 
     params

@@ -16,7 +16,7 @@ titan-swap-api-client = { git = "https://github.com/0xahzam/titan-swap-api-clien
 ### Basic Example
 
 ```rust
-use titan_swap_api_client::{quote::QuoteRequest, quote::SwapMode, TitanClient};
+use titan_swap_api_client::{quote::{QuoteRequest, SwapMode, Provider}, TitanClient};
 use solana_sdk::pubkey::Pubkey;
 use std::str::FromStr;
 
@@ -33,6 +33,7 @@ async fn main() -> anyhow::Result<()> {
         max_accounts: Some(50),
         swap_mode: Some(SwapMode::ExactIn),
         slippage_bps: 50,
+        providers: Some(Provider::Titan), // Optional: force Titan routing only
         ..Default::default()
     };
 
@@ -41,7 +42,7 @@ async fn main() -> anyhow::Result<()> {
     println!("Quote: {} -> {}", quote.in_amount, quote.out_amount);
 
     // Get swap instructions
-    let swap = client.swap(&request).await?;
+    let swap = client.swap(&quote)?;
     println!("Instructions: {}", swap.instructions.len());
 
     Ok(())
@@ -57,6 +58,7 @@ async fn main() -> anyhow::Result<()> {
 - `max_accounts`: Maximum number of accounts (optional)
 - `swap_mode`: `SwapMode::ExactIn` or `SwapMode::ExactOut` (optional)
 - `slippage_bps`: Slippage tolerance in basis points (e.g., 50 = 0.5%)
+- `providers`: `Some(Provider::Titan)` to force Titan only routing, `None` for best route across all providers (optional)
 - `only_direct_routes`: Only direct routes (optional)
 - `excluded_dexes`: Comma-separated list of DEXes to exclude (optional)
 

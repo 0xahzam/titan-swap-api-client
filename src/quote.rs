@@ -87,6 +87,17 @@ pub struct QuoteResponse {
 
 type Dexes = String;
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
+pub enum Provider {
+    Titan,
+}
+
+impl ToString for Provider {
+    fn to_string(&self) -> String {
+        "Titan".to_string()
+    }
+}
+
 #[derive(Serialize, Debug, Default, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct QuoteRequest {
@@ -105,6 +116,7 @@ pub struct QuoteRequest {
     pub excluded_dexes: Option<Dexes>,
     pub size_constraints: Option<u64>,
     pub accounts_limit_writable: Option<u64>,
+    pub providers: Option<Provider>,
 }
 
 type MsgpackPubkey = [u8; 32];
