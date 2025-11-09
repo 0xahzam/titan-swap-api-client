@@ -134,9 +134,14 @@ async fn build_and_sign_transaction(
             alt_addresses.len()
         );
 
+        let accounts = rpc_client.get_multiple_accounts(&alt_addresses).await?;
+
         let mut tables = Vec::with_capacity(alt_addresses.len());
-        for alt_address in &alt_addresses {
-            let account = rpc_client.get_account(alt_address).await?;
+        for (alt_address, account_opt) in alt_addresses.iter().zip(accounts.iter()) {
+            let account = account_opt
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("ALT account not found: {}", alt_address))?;
+
             let alt = AddressLookupTable::deserialize(&account.data)?;
 
             println!(
